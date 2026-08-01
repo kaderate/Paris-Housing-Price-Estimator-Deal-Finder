@@ -1,6 +1,15 @@
+import logging
 import re
+import time
+from datetime import date
+
 import pandas as pd
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+import config
+
+logger = logging.getLogger(__name__)
+
 
 def ajout_DPE(card, liste_DPE):
     try:
@@ -10,8 +19,9 @@ def ajout_DPE(card, liste_DPE):
             dpe_text = dpe_element.inner_text().strip()
         liste_DPE.append(dpe_text)
     except Exception as e:
-        print(f"Erreur lors de l'ajout du DPE : {e}")
+        logger.warning("Erreur lors de l'ajout du DPE : %s", e)
         liste_DPE.append(None)
+
 
 def ajout_pieces(card, liste_pieces):
     try:
@@ -22,8 +32,9 @@ def ajout_pieces(card, liste_pieces):
             liste_pieces.append(int(piece_text[0]))
         else:
             liste_pieces.append(None)
-    except Exception as e:
+    except Exception:
         liste_pieces.append(None)
+
 
 def ajout_prix(card, liste_prix):
     try:
@@ -36,8 +47,9 @@ def ajout_prix(card, liste_prix):
         else:
             liste_prix.append(None)
     except Exception as e:
-        print(f"Erreur lors de l'ajout du prix : {e}")
+        logger.warning("Erreur lors de l'ajout du prix : %s", e)
         liste_prix.append(None)
+
 
 def ajout_surface(card, liste_surface):
     try:
@@ -49,8 +61,9 @@ def ajout_surface(card, liste_surface):
         else:
             liste_surface.append(None)
     except Exception as e:
-        print(f"Erreur lors de l'ajout de la surface : {e}")
+        logger.warning("Erreur lors de l'ajout de la surface : %s", e)
         liste_surface.append(None)
+
 
 def ajout_arrondissement(card, liste_arrondissement):
     try:
@@ -62,38 +75,99 @@ def ajout_arrondissement(card, liste_arrondissement):
         else:
             liste_arrondissement.append(None)
     except Exception as e:
-        print(f"Erreur lors de l'ajout de l'arrondissement : {e}")
+        logger.warning("Erreur lors de l'ajout de l'arrondissement : %s", e)
         liste_arrondissement.append(None)
+
+
+def ajout_lien(card, liste_lien):
+    try:
+        href = card.locator('a.hover\\:no-underline').first.get_attribute("href")
+        if href:
+            if href.startswith("http"):
+                liste_lien.append(href)
+            else:
+                liste_lien.append(f"{config.SITE_URL}{href}")
+        else:
+            liste_lien.append(None)
+    except Exception as e:
+        logger.warning("Erreur lors de l'ajout du lien : %s", e)
+        liste_lien.append(None)
+
+
+def ajout_description(card, liste_description):
+    try:
+        description = card.locator("p.line-clamp-5").first.inner_text(timeout=500).strip()
+        description = re.sub(r"\s+", " ", description)
+        mots = description.split(" ")
+        liste_description.append(" ".join(mots[:config.DESCRIPTION_NB_MOTS]) + ("…" if len(mots) > config.DESCRIPTION_NB_MOTS else ""))
+    except Exception:
+        liste_description.append(None)
+
+
+def _goto_avec_retry(page, url):
+    """Navigue vers `url`, avec réessais en cas d'échec réseau/timeout."""
+    derniere_erreur = None
+    for tentative in range(1, config.MAX_PAGE_RETRIES + 1):
+        try:
+            page.goto(url, wait_until="networkidle")
+            return True
+        except PlaywrightTimeoutError as e:
+            derniere_erreur = e
+            logger.warning(
+                "Timeout sur %s (tentative %d/%d) : %s",
+                url, tentative, config.MAX_PAGE_RETRIES, e,
+            )
+            time.sleep(config.RETRY_DELAY_SECONDS)
+    logger.error("Abandon de la page %s après %d tentatives : %s", url, config.MAX_PAGE_RETRIES, derniere_erreur)
+    return False
+
+
+def _sauvegarder_historique(df):
+    """Ajoute les lignes scrapées aujourd'hui à l'historique, sans dupliquer les annonces déjà connues."""
+    try:
+        historique = pd.read_csv(config.HISTORY_CSV)
+        combine = pd.concat([historique, df], ignore_index=True)
+    except FileNotFoundError:
+        combine = df
+
+    colonnes_annonce = ["Lien", "Prix", "Surface", "Arrondissement", "Pieces", "DPE"]
+    combine = combine.drop_duplicates(subset=colonnes_annonce, keep="first")
+    combine.to_csv(config.HISTORY_CSV, index=False)
+    logger.info("Historique mis à jour : %d annonces uniques cumulées.", len(combine))
+
 
 def run_scraping():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/144.0.0.0 Safari/537.36')
+        context = browser.new_context(user_agent=config.USER_AGENT)
         page = context.new_page()
-    
+
         try:
             liste_prix = []
             liste_surface = []
             liste_pieces = []
             liste_arrondissement = []
             liste_DPE = []
+            liste_lien = []
+            liste_description = []
 
-            page.goto(
-                "https://www.paruvendu.fr/immobilier/recherche/location/appartement/paris-75/?rechpv=1&tt=5&tbApp=1&tbDup=1&tbChb=1&tbLof=1&tbAtl=1&tbPla=1&tbMai=1&tbVil=1&tbCha=1&tbPro=1&tbHot=1&tbMou=1&lo=75&ddlFiltres=nofilter&prestige=0",
-                wait_until='networkidle'
-            )
+            if not _goto_avec_retry(page, config.BASE_URL):
+                logger.error("Impossible de charger la page de recherche initiale, scraping annulé.")
+                return None
+
             parent_block = page.locator("p.text-sm").all()
             card = parent_block[-1].first.inner_text()
             motif_card = r"(?<=(?:sur ))\s*[-+]?\d+(?:[.,]\d+)?"
             page_text = re.findall(motif_card, card)
-            nombre_pages = int(float(page_text[0])//29)+1
+            nombre_pages = int(float(page_text[0]) // config.LISTINGS_PER_PAGE) + 1
 
-            for i in range(1, nombre_pages+1):
-                print(f'Analyse de la page {i}')
-                page.goto(
-                    f"https://www.paruvendu.fr/immobilier/recherche/location/appartement/paris-75/?rechpv=1&tt=5&tbApp=1&tbDup=1&tbChb=1&tbLof=1&tbAtl=1&tbPla=1&tbMai=1&tbVil=1&tbCha=1&tbPro=1&tbHot=1&tbMou=1&lo=75&ddlFiltres=nofilter&prestige=0&p={i}",
-                    wait_until='networkidle'
-                )
+            for i in range(1, nombre_pages + 1):
+                logger.info("Analyse de la page %d/%d", i, nombre_pages)
+                url_page = f"{config.BASE_URL}&p={i}"
+
+                if not _goto_avec_retry(page, url_page):
+                    logger.warning("Page %d ignorée après échec des tentatives.", i)
+                    continue
 
                 parent_block = page.locator("div.blocAnnonce").all()
 
@@ -103,25 +177,36 @@ def run_scraping():
                     ajout_arrondissement(card, liste_arrondissement)
                     ajout_pieces(card, liste_pieces)
                     ajout_DPE(card, liste_DPE)
+                    ajout_lien(card, liste_lien)
+                    ajout_description(card, liste_description)
+
+                if i < nombre_pages:
+                    time.sleep(config.PAGE_DELAY_SECONDS)
 
             df = pd.DataFrame({
-                "Prix" : liste_prix, 
-                "Surface" : liste_surface, 
-                "Arrondissement" : liste_arrondissement, 
-                "Pieces" : liste_pieces,
-                "DPE" : liste_DPE
+                "Prix": liste_prix,
+                "Surface": liste_surface,
+                "Arrondissement": liste_arrondissement,
+                "Pieces": liste_pieces,
+                "DPE": liste_DPE,
+                "Lien": liste_lien,
+                "Description": liste_description,
             })
-            dpe_map = {'A': 7, 'B': 6, 'C': 5, 'D': 4, 'E': 3, 'F': 2, 'G': 1}
-            df['DPE'] = df['DPE'].map(dpe_map)
-            df.to_csv('Data_Loyer.csv', index=False)
+            df["DPE"] = df["DPE"].map(config.DPE_MAP)
+            df["Date_scraping"] = date.today().isoformat()
+            df.to_csv(config.RAW_CSV, index=False)
+            _sauvegarder_historique(df)
 
         except Exception as e:
-            print(f"Exception {e}")
+            logger.error("Exception pendant le scraping : %s", e)
+            return None
 
         finally:
-            print('Fin du scraping')
+            logger.info("Fin du scraping")
             browser.close()
-        return 'Data_Loyer.csv'
-    
-if __name__ == '__main__':
+        return config.RAW_CSV
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     run_scraping()

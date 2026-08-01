@@ -60,10 +60,15 @@ Since our target discount threshold is set to **$\ge 15\%$**, it operates right 
 
 ## 📁 Repository Structure
 * [main.py](file:///Users/ennio/Documents/Projet_Scrap/main.py): Pipeline orchestrator.
-* [scrap.py](file:///Users/ennio/Documents/Projet_Scrap/scrap.py): Playwright script to fetch real-time listings.
+* [scrap.py](file:///Users/ennio/Documents/Projet_Scrap/scrap.py): Playwright script to fetch real-time listings (with per-page retries and a run history).
 * [model.py](file:///Users/ennio/Documents/Projet_Scrap/model.py): Data cleaning, preprocessing pipeline, ML training, and deal extraction.
-* `Data_Loyer.csv`: Scraped raw listings dataset.
+* `report.py`: Generates a human-readable Markdown summary of the detected deals.
+* `config.py`: Central place for URLs, file paths, and thresholds (outlier bounds, discount threshold).
+* `tests/`: Unit tests (pytest) covering data cleaning and deal-detection logic.
+* `Data_Loyer.csv`: Latest scraped raw listings dataset.
+* `Data_Loyer_historique.csv`: Cumulative, de-duplicated history of listings seen across scraping runs.
 * [Appartement_interessant.csv](file:///Users/ennio/Documents/Projet_Scrap/Appartement_interessant.csv): Exported deals under market value.
+* `rapport_bonnes_affaires.md`: Markdown report of the current best deals, regenerated on every run.
 
 ---
 
@@ -75,13 +80,26 @@ Since our target discount threshold is set to **$\ge 15\%$**, it operates right 
    cd Paris-Housing-Price-Estimator-Deal-Finder
    ```
 
-2. **Install dependencies**:
+2. **Create a virtual environment and install dependencies**:
    ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
    playwright install chromium
    ```
+   > On macOS with Homebrew Python, running `pip install` outside a virtual environment raises an `externally-managed-environment` error (PEP 668). Using a `venv` as shown above avoids this.
 
 3. **Run the pipeline**:
    ```bash
    python main.py
+   ```
+   Optionally restrict the detected deals to your own search criteria:
+   ```bash
+   python main.py --surface-min 20 --surface-max 40 --budget-min 800 --budget-max 1200
+   ```
+   All four flags are optional and can be combined freely (`--surface-min`, `--surface-max`, `--budget-min`, `--budget-max`).
+
+4. **Run the test suite**:
+   ```bash
+   pytest
    ```
