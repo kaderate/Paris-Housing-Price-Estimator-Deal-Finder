@@ -205,7 +205,11 @@ def run_scraping():
         if proxy:
             logger.info("Proxy sortant détecté dans l'environnement, transmis à Chromium : %s", proxy["server"])
         browser = p.chromium.launch(headless=True, args=config.CHROMIUM_ARGS, proxy=proxy)
-        context = browser.new_context(user_agent=config.USER_AGENT)
+        # Quand un proxy sortant est détecté, il s'agit typiquement d'un proxy d'interception
+        # TLS (certificat CA injecté dans le magasin système pour curl/pip). Le magasin de
+        # certificats propre à Chromium ne fait pas forcément confiance à ce CA, ce qui casse
+        # la connexion (ERR_CONNECTION_RESET) même si le proxy lui-même est correctement utilisé.
+        context = browser.new_context(user_agent=config.USER_AGENT, ignore_https_errors=bool(proxy))
         page = context.new_page()
 
         try:
