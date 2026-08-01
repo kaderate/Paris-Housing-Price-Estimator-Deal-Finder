@@ -12,6 +12,11 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, Gecko) Chrome/144.0.0.0 Safari/537.36"
 )
+# --disable-http2 : certains proxys sortants (notamment en environnement cloud sandboxé)
+# gèrent mal la négociation HTTP/2 (ALPN h2) que Chromium utilise par défaut, ce qui se
+# traduit par un net::ERR_CONNECTION_RESET dès la requête initiale alors qu'un client
+# HTTP/1.1 comme curl passe sans problème. Le forcer en HTTP/1.1 évite ce cas.
+CHROMIUM_ARGS = ["--disable-http2"]
 DPE_MAP = {"A": 7, "B": 6, "C": 5, "D": 4, "E": 3, "F": 2, "G": 1}
 LISTINGS_PER_PAGE = 29
 MAX_PAGE_RETRIES = 3

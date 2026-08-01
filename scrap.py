@@ -179,7 +179,7 @@ def _sauvegarder_historique(df):
 
 def run_scraping():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=config.CHROMIUM_ARGS)
         context = browser.new_context(user_agent=config.USER_AGENT)
         page = context.new_page()
 
