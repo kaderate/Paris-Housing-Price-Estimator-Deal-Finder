@@ -16,32 +16,49 @@ set -euo pipefail
 
 FICHIER="Data_Loyer_historique.csv"
 GIST_DESCRIPTION="paris-housing-historique-v1"
+# Figé en dur plutôt que déduit de `git remote get-url origin` : certains environnements
+# cloud réécrivent ce remote vers un proxy git local (ex. http://local_proxy@127.0.0.1/...),
+# ce qui casse toute extraction dynamique de l'owner/repo depuis son URL.
+DEPOT="kaderate/Paris-Housing-Price-Estimator-Deal-Finder"
 
 if [ ! -f "$FICHIER" ]; then
     echo "Aucun $FICHIER à publier, on ne fait rien."
     exit 0
 fi
 
+# NB : ces fonctions sont appelées comme condition d'un `if` (ex. `if publier_via_git; then`).
+# Piège bash classique : `set -e` est SUSPENDU pour toute la durée d'une fonction quand elle
+# est utilisée ainsi, donc une commande interne qui échoue ne stoppe rien automatiquement.
+# D'où les vérifications explicites (`|| return 1`) après chaque étape sensible, et le
+# garde-fou final sur `$commit` : un push avec une référence source vide (`:refs/heads/data`)
+# est interprété par git comme un ordre de SUPPRESSION de la branche distante — un bug de ce
+# genre a déjà supprimé la branche 'data' une fois, sans le garde-fou ça repasserait inaperçu.
+
 publier_via_git_avec_pat() {
-    local pat repo_url owner_repo remote_url blob nouvel_arbre parent commit
+    local pat remote_url blob nouvel_arbre parent commit
 
     pat="${HISTORIQUE_GH_TOKEN:-}"
     if [ -z "$pat" ]; then
         return 1
     fi
 
-    repo_url=$(git remote get-url origin)
-    owner_repo=$(echo "$repo_url" | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
-    remote_url="https://x-access-token:${pat}@github.com/${owner_repo}.git"
+    remote_url="https://x-access-token:${pat}@github.com/${DEPOT}.git"
 
-    blob=$(git hash-object -w "$FICHIER")
-    nouvel_arbre=$(printf "100644 blob %s\t%s\n" "$blob" "$FICHIER" | git mktree)
+    blob=$(git hash-object -w "$FICHIER") || return 1
+    nouvel_arbre=$(printf "100644 blob %s\t%s\n" "$blob" "$FICHIER" | git mktree) || return 1
 
-    parent=$(git ls-remote "$remote_url" refs/heads/data 2>/dev/null | cut -f1)
-    if [ -n "$parent" ]; then
-        commit=$(echo "Mise à jour de l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre" -p "$parent")
+    # git ls-remote ne télécharge pas les objets : on ne peut pas s'en servir comme parent
+    # de commit-tree (l'objet doit exister localement). Il faut vraiment fetch.
+    if git fetch "$remote_url" data 2>/dev/null; then
+        parent=$(git rev-parse FETCH_HEAD) || return 1
+        commit=$(echo "Mise à jour de l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre" -p "$parent") || return 1
     else
-        commit=$(echo "Initialise l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre")
+        commit=$(echo "Initialise l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre") || return 1
+    fi
+
+    if [ -z "$commit" ]; then
+        echo "Commit vide, abandon (évite un push destructeur)." >&2
+        return 1
     fi
 
     git push "$remote_url" "$commit:refs/heads/data"
@@ -49,24 +66,27 @@ publier_via_git_avec_pat() {
 
 publier_via_git() {
     local blob nouvel_arbre commit
-    blob=$(git hash-object -w "$FICHIER")
-    nouvel_arbre=$(printf "100644 blob %s\t%s\n" "$blob" "$FICHIER" | git mktree)
+    blob=$(git hash-object -w "$FICHIER") || return 1
+    nouvel_arbre=$(printf "100644 blob %s\t%s\n" "$blob" "$FICHIER" | git mktree) || return 1
 
     git fetch origin data 2>/dev/null || true
     if git rev-parse --verify origin/data >/dev/null 2>&1; then
-        commit=$(echo "Mise à jour de l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre" -p origin/data)
+        commit=$(echo "Mise à jour de l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre" -p origin/data) || return 1
     else
-        commit=$(echo "Initialise l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre")
+        commit=$(echo "Initialise l'historique ($(date -u +%Y-%m-%dT%H:%M:%SZ))" | git commit-tree "$nouvel_arbre") || return 1
+    fi
+
+    if [ -z "$commit" ]; then
+        echo "Commit vide, abandon (évite un push destructeur)." >&2
+        return 1
     fi
 
     git push origin "$commit:refs/heads/data"
 }
 
 publier_via_api_github() {
-    local repo_url owner_repo token sha_existant contenu_b64 payload_fichier code_http
+    local token sha_existant contenu_b64 payload_fichier code_http
 
-    repo_url=$(git remote get-url origin)
-    owner_repo=$(echo "$repo_url" | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
     token="${HISTORIQUE_GH_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
 
     if [ -z "$token" ]; then
@@ -75,7 +95,7 @@ publier_via_api_github() {
     fi
 
     sha_existant=$(curl -sS -H "Authorization: Bearer $token" \
-        "https://api.github.com/repos/$owner_repo/contents/$FICHIER?ref=data" \
+        "https://api.github.com/repos/$DEPOT/contents/$FICHIER?ref=data" \
         | python3 -c "import sys, json; print(json.load(sys.stdin).get('sha', ''))" 2>/dev/null || echo "")
 
     contenu_b64=$(base64 < "$FICHIER" | tr -d '\n')
@@ -92,7 +112,7 @@ publier_via_api_github() {
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
         --data-binary "@$payload_fichier" \
-        "https://api.github.com/repos/$owner_repo/contents/$FICHIER")
+        "https://api.github.com/repos/$DEPOT/contents/$FICHIER")
     rm -f "$payload_fichier"
 
     if [ "$code_http" = "200" ] || [ "$code_http" = "201" ]; then
