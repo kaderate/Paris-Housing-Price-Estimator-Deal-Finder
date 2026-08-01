@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+import config
 from scrap import run_scraping
 from model import nettoyage_donnees, model_entrainement, bon_plan
 from report import generer_rapport
@@ -35,8 +36,8 @@ if __name__ == "__main__":
     fichier = run_scraping()
 
     if fichier:
-        logger.info("2. Nettoyage des données...")
-        df = nettoyage_donnees(fichier)
+        logger.info("2. Nettoyage des données (historique cumulé)...")
+        df = nettoyage_donnees(config.HISTORY_CSV)
 
         logger.info("3. Entraînement du modèle Machine Learning...")
         model, x, y = model_entrainement(df)

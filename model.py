@@ -1,9 +1,9 @@
 import logging
+from datetime import date
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score, mean_absolute_error
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
@@ -32,17 +32,19 @@ def model_entrainement(df):
     y = np.log1p(df["Prix"])
     x = df[["Surface", "Arrondissement", "Pieces", "DPE", "Surface par pieces"]]
 
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=0)
-
     preprocessor = ColumnTransformer(
         transformers=[('cat', encoder, ["Arrondissement"])],
         remainder='passthrough')
 
+    # min_samples_leaf régularise le RandomForest : avec un historique encore modeste,
+    # des arbres profonds sans cette borne mémorisent quasiment chaque annonce plutôt
+    # que d'apprendre une tendance de prix généralisable.
     model = Pipeline(steps=[('preprocessor', preprocessor),
-                            ('regressor', RandomForestRegressor(n_estimators=100, max_depth=12, random_state=0))
+                            ('regressor', RandomForestRegressor(
+                                n_estimators=100, max_depth=12, min_samples_leaf=3, random_state=0))
                      ])
 
-    model.fit(x_train, y_train)
+    model.fit(x, y)
 
     return model, x, y
 
@@ -65,9 +67,15 @@ def bon_plan(model, x, y, df, surface_min=None, surface_max=None, budget_min=Non
     df['Estimation'] = np.expm1(y_pred_log)
     mae = mean_absolute_error(df['Prix'], df['Estimation'])
     r2 = r2_score(df['Prix'], df['Estimation'])
-    logger.info("MAE : %.2f €", mae)
+    logger.info("MAE (sur %d annonces cumulées) : %.2f €", len(df), mae)
     logger.info("R² : %.3f", r2)
     df["Decote"] = ((df["Prix"] - df["Estimation"]) / df["Estimation"])*100
+
+    # L'estimation bénéficie de tout l'historique cumulé, mais on ne propose que des
+    # annonces vues aujourd'hui : le reste peut déjà être loué ou retiré de l'annonce.
+    if "Date_scraping" in df.columns:
+        df = df[df["Date_scraping"] == date.today().isoformat()]
+
     df = df[df["Decote"] <= config.DECOTE_SEUIL]
     df = filtrer_criteres(df, surface_min, surface_max, budget_min, budget_max)
     df = df.sort_values(by=["Decote"], ascending=True)

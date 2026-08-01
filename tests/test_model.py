@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -118,3 +120,29 @@ def test_filtrer_criteres_sans_bornes_ne_filtre_rien():
     resultat = filtrer_criteres(df)
 
     assert len(resultat) == len(df)
+
+
+def test_bon_plan_ne_remonte_que_les_annonces_du_jour(monkeypatch, tmp_path):
+    hier = (date.today() - timedelta(days=1)).isoformat()
+    aujourdhui = date.today().isoformat()
+    df = pd.DataFrame({
+        "Prix": [700.0, 650.0],  # tous deux en décote vs estimation=1000
+        "Surface": [30.0, 30.0],
+        "Arrondissement": [15, 15],
+        "Pieces": [1, 1],
+        "DPE": [4, 4],
+        "Date_scraping": [hier, aujourdhui],
+    })
+    x = df[["Surface", "Arrondissement", "Pieces", "DPE"]]
+    y = np.log1p(df["Prix"])
+
+    monkeypatch.setattr(
+        "model.cross_val_predict",
+        lambda model, x, y, cv: np.log1p(pd.Series([1000.0] * len(x))),
+    )
+    monkeypatch.setattr(config, "DEALS_CSV", str(tmp_path / "test_bonnes_affaires.csv"))
+
+    _, df_deals = bon_plan(ModeleFictif(), x, y, df)
+
+    assert len(df_deals) == 1
+    assert df_deals.iloc[0]["Prix"] == 650.0  # l'annonce d'hier est exclue malgré sa décote
