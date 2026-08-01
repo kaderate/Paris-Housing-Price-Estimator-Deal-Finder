@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # Récupère Data_Loyer_historique.csv avant de scraper, pour faire persister l'historique
 # entre les runs de la routine cloud (chacun repart d'un clone neuf du dépôt).
-# Priorité au Gist : c'est le palier d'écriture le plus permissif dans push_historique.sh,
-# donc s'il existe c'est probablement la source la plus à jour. Sinon, repli sur la
-# branche "data" (Data_Loyer_historique.csv est volontairement exclu du suivi sur main,
-# cf. .gitignore, pour ne pas polluer son historique de commits).
+# Priorité à la branche "data" : avec HISTORIQUE_GH_TOKEN (cf. push_historique.sh), c'est
+# la source la plus fiable et la plus à jour. Le Gist reste un repli pour les
+# environnements sans token dédié (Data_Loyer_historique.csv est volontairement exclu du
+# suivi sur main, cf. .gitignore, pour ne pas polluer son historique de commits).
 # Ne touche jamais à la branche locale courante.
 set -euo pipefail
 
 FICHIER="Data_Loyer_historique.csv"
 GIST_DESCRIPTION="paris-housing-historique-v1"
 
+recuperer_depuis_branche_data() {
+    git fetch origin data 2>/dev/null || true
+    if ! git rev-parse --verify origin/data >/dev/null 2>&1; then
+        return 1
+    fi
+    git show "origin/data:$FICHIER" > "$FICHIER"
+    echo "Historique récupéré depuis la branche 'data' ($(($(wc -l < "$FICHIER") - 1)) annonces)."
+}
+
 recuperer_depuis_gist() {
     local token gist_id contenu_url
 
-    token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    token="${HISTORIQUE_GH_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
     if [ -z "$token" ]; then
         return 1
     fi
@@ -45,19 +54,10 @@ print(json.load(sys.stdin)['files']['$FICHIER']['raw_url'])
     echo "Historique récupéré depuis le Gist $gist_id ($(($(wc -l < "$FICHIER") - 1)) annonces)."
 }
 
-recuperer_depuis_branche_data() {
-    git fetch origin data 2>/dev/null || true
-    if ! git rev-parse --verify origin/data >/dev/null 2>&1; then
-        return 1
-    fi
-    git show "origin/data:$FICHIER" > "$FICHIER"
-    echo "Historique récupéré depuis la branche 'data' ($(($(wc -l < "$FICHIER") - 1)) annonces)."
-}
-
-if recuperer_depuis_gist; then
+if recuperer_depuis_branche_data; then
     :
-elif recuperer_depuis_branche_data; then
+elif recuperer_depuis_gist; then
     :
 else
-    echo "Aucune source d'historique trouvée (ni Gist, ni branche 'data') — premier run, l'historique démarre vide."
+    echo "Aucune source d'historique trouvée (ni branche 'data', ni Gist) — premier run, l'historique démarre vide."
 fi
