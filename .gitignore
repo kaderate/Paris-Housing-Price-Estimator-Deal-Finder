@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# Données scrapées et rapports générés par le pipeline (régénérés à chaque run)
+Data_Loyer.csv
+Data_Loyer_historique.csv
+Appartement_interessant.csv
+rapport_bonnes_affaires.md
+rapport_bonnes_affaires.html
