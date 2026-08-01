@@ -4,11 +4,45 @@ import time
 from datetime import date
 
 import pandas as pd
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright, Error as PlaywrightError
 
 import config
 
 logger = logging.getLogger(__name__)
+
+MARQUEURS_ERREUR_RESEAU = (
+    "net::ERR_",
+    "NS_ERROR_",
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_CONNECTION",
+    "ERR_INTERNET_DISCONNECTED",
+    "ERR_TUNNEL_CONNECTION_FAILED",
+    "ERR_BLOCKED_BY_",
+    "ERR_PROXY_CONNECTION_FAILED",
+)
+
+
+class ErreurReseau(RuntimeError):
+    """Levée quand le site cible (ou le CDN Playwright) est injoignable pour une raison réseau."""
+
+    def __init__(self, url, cause):
+        message = (
+            f"\n{'=' * 70}\n"
+            f"ERREUR RÉSEAU : impossible de joindre {url}\n"
+            f"Le domaine ({config.SITE_URL}) et/ou le CDN Playwright semble bloqué, "
+            "mal résolu (DNS) ou inaccessible.\n"
+            "Vérifie la configuration réseau (liste blanche de domaines, proxy, pare-feu) "
+            "de l'environnement d'exécution avant de relancer le pipeline.\n"
+            f"Détail technique : {cause}\n"
+            f"{'=' * 70}"
+        )
+        super().__init__(message)
+
+
+def _est_erreur_reseau(exception):
+    """Détecte si une erreur Playwright ressemble à une coupure réseau plutôt qu'à un simple timeout applicatif."""
+    message = str(exception)
+    return any(marqueur in message for marqueur in MARQUEURS_ERREUR_RESEAU)
 
 
 def ajout_DPE(card, liste_DPE):
@@ -105,13 +139,20 @@ def ajout_description(card, liste_description):
 
 
 def _goto_avec_retry(page, url):
-    """Navigue vers `url`, avec réessais en cas d'échec réseau/timeout."""
+    """Navigue vers `url`, avec réessais en cas de timeout applicatif.
+
+    Une erreur réseau (DNS, connexion refusée, domaine bloqué) n'est PAS réessayée :
+    elle est quasi certainement persistante, donc on échoue immédiatement avec un
+    message explicite plutôt que de perdre du temps sur plusieurs tentatives/pages.
+    """
     derniere_erreur = None
     for tentative in range(1, config.MAX_PAGE_RETRIES + 1):
         try:
             page.goto(url, wait_until="networkidle")
             return True
-        except PlaywrightTimeoutError as e:
+        except PlaywrightError as e:
+            if _est_erreur_reseau(e):
+                raise ErreurReseau(url, e) from e
             derniere_erreur = e
             logger.warning(
                 "Timeout sur %s (tentative %d/%d) : %s",
@@ -196,6 +237,10 @@ def run_scraping():
             df["Date_scraping"] = date.today().isoformat()
             df.to_csv(config.RAW_CSV, index=False)
             _sauvegarder_historique(df)
+
+        except ErreurReseau as e:
+            logger.error(str(e))
+            return None
 
         except Exception as e:
             logger.error("Exception pendant le scraping : %s", e)
