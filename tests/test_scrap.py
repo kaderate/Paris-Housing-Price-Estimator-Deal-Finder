@@ -60,3 +60,18 @@ def test_goto_avec_retry_reessaie_sur_simple_timeout(monkeypatch):
 
     assert resultat is False
     assert page.appels == config.MAX_PAGE_RETRIES  # un timeout applicatif est bien réessayé
+
+
+def test_proxy_depuis_environnement_absent(monkeypatch):
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(var, raising=False)
+
+    assert scrap._proxy_depuis_environnement() is None
+
+
+def test_proxy_depuis_environnement_present(monkeypatch):
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:40429")
+
+    assert scrap._proxy_depuis_environnement() == {"server": "http://127.0.0.1:40429"}

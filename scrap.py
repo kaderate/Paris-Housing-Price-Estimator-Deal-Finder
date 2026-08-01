@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import time
 from datetime import date
@@ -43,6 +44,27 @@ def _est_erreur_reseau(exception):
     """Détecte si une erreur Playwright ressemble à une coupure réseau plutôt qu'à un simple timeout applicatif."""
     message = str(exception)
     return any(marqueur in message for marqueur in MARQUEURS_ERREUR_RESEAU)
+
+
+def _proxy_depuis_environnement():
+    """Construit la config `proxy` de Playwright à partir des variables d'environnement standard.
+
+    Contrairement à curl ou pip, le navigateur Chromium lancé par Playwright n'utilise PAS
+    automatiquement HTTPS_PROXY/HTTP_PROXY : il faut les lui transmettre explicitement via
+    `chromium.launch(proxy=...)`. Sans ça, dans un environnement où le proxy sortant est
+    obligatoire (ex. sandbox cloud), le navigateur tente une connexion directe qui est
+    coupée par la politique réseau (net::ERR_CONNECTION_RESET), alors même que curl/pip
+    fonctionnent normalement.
+    """
+    serveur = (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+    )
+    if not serveur:
+        return None
+    return {"server": serveur}
 
 
 def ajout_DPE(card, liste_DPE):
@@ -179,7 +201,10 @@ def _sauvegarder_historique(df):
 
 def run_scraping():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=config.CHROMIUM_ARGS)
+        proxy = _proxy_depuis_environnement()
+        if proxy:
+            logger.info("Proxy sortant détecté dans l'environnement, transmis à Chromium : %s", proxy["server"])
+        browser = p.chromium.launch(headless=True, args=config.CHROMIUM_ARGS, proxy=proxy)
         context = browser.new_context(user_agent=config.USER_AGENT)
         page = context.new_page()
 
