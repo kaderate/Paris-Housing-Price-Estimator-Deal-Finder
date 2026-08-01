@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from playwright.sync_api import Error as PlaywrightError
+import requests
 
 import config
 import scrap
@@ -31,47 +31,49 @@ def test_sauvegarder_historique_dedoublonne(monkeypatch, tmp_path):
     assert resultat.iloc[0]["Date_scraping"] == "2026-07-01"  # la première occurrence est conservée
 
 
-class PageAvecErreurReseau:
-    """Simule une page Playwright dont goto() échoue systématiquement avec une erreur réseau Chromium."""
-
-    def __init__(self, message):
-        self.message = message
-        self.appels = 0
-
-    def goto(self, url, wait_until=None):
-        self.appels += 1
-        raise PlaywrightError(self.message)
+class ReponseFactice:
+    def __init__(self, status_code, text=""):
+        self.status_code = status_code
+        self.text = text
 
 
-def test_goto_avec_retry_echoue_immediatement_sur_erreur_reseau():
-    page = PageAvecErreurReseau("net::ERR_NAME_NOT_RESOLVED at https://www.paruvendu.fr/")
+def test_get_avec_retry_echoue_immediatement_sur_erreur_http(monkeypatch):
+    appels = []
+
+    def faux_get(url, headers=None, timeout=None):
+        appels.append(url)
+        return ReponseFactice(403)
+
+    monkeypatch.setattr(scrap.requests, "get", faux_get)
+
+    with pytest.raises(scrap.ErreurHTTP):
+        scrap._get_avec_retry("https://www.paruvendu.fr/")
+
+    assert len(appels) == 1  # aucune tentative gaspillée : un statut HTTP d'erreur n'est pas transitoire
+
+
+def test_get_avec_retry_reessaie_sur_erreur_de_connexion(monkeypatch):
+    monkeypatch.setattr(config, "RETRY_DELAY_SECONDS", 0)
+    appels = []
+
+    def faux_get(url, headers=None, timeout=None):
+        appels.append(url)
+        raise requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(scrap.requests, "get", faux_get)
 
     with pytest.raises(scrap.ErreurReseau):
-        scrap._goto_avec_retry(page, "https://www.paruvendu.fr/")
+        scrap._get_avec_retry("https://www.paruvendu.fr/")
 
-    assert page.appels == 1  # aucune tentative gaspillée : on échoue dès la première erreur réseau
-
-
-def test_goto_avec_retry_reessaie_sur_simple_timeout(monkeypatch):
-    monkeypatch.setattr(config, "RETRY_DELAY_SECONDS", 0)
-    page = PageAvecErreurReseau("Timeout 30000ms exceeded.")
-
-    resultat = scrap._goto_avec_retry(page, "https://www.paruvendu.fr/")
-
-    assert resultat is False
-    assert page.appels == config.MAX_PAGE_RETRIES  # un timeout applicatif est bien réessayé
+    assert len(appels) == config.MAX_PAGE_RETRIES  # une erreur de connexion transitoire est bien réessayée
 
 
-def test_proxy_depuis_environnement_absent(monkeypatch):
-    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
-        monkeypatch.delenv(var, raising=False)
+def test_get_avec_retry_retourne_la_reponse_si_succes(monkeypatch):
+    def faux_get(url, headers=None, timeout=None):
+        return ReponseFactice(200, text="<html></html>")
 
-    assert scrap._proxy_depuis_environnement() is None
+    monkeypatch.setattr(scrap.requests, "get", faux_get)
 
+    reponse = scrap._get_avec_retry("https://www.paruvendu.fr/")
 
-def test_proxy_depuis_environnement_present(monkeypatch):
-    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:40429")
-
-    assert scrap._proxy_depuis_environnement() == {"server": "http://127.0.0.1:40429"}
+    assert reponse.status_code == 200

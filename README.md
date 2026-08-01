@@ -8,7 +8,7 @@
 Finding an apartment at a fair price in Paris is a major challenge due to high demand and significant price variance. 
 
 This project automates the entire data lifecycle to detect market anomalies:
-1. **Automated Scraping**: Crawls live rental listings in Paris using [Playwright](https://playwright.dev/).
+1. **Automated Scraping**: Crawls live rental listings in Paris over plain HTTP ([requests](https://requests.readthedocs.io/) + [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/)) — the target site is server-rendered, so no browser is needed.
 2. **Data Cleaning & Filtering**: Purges outliers and cleans structural features using [Pandas](https://pandas.pydata.org/).
 3. **ML Modeling**: Estimates rental prices using a `RandomForestRegressor` with target log-transformation (`log1p`) and column-specific preprocessing.
 4. **Deal Detection Engine**: Isolates listings priced $\ge 15\%$ below their estimated market value using **unbiased out-of-fold predictions**.
@@ -20,7 +20,7 @@ This project automates the entire data lifecycle to detect market anomalies:
 ```text
 ┌────────────────────────┐      ┌─────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
 │      Web Scraping      │ ───> │     Data Cleaning       │ ───> │    Machine Learning    │ ───> │      Deal Engine       │
-│  (Playwright - Python) │      │   (Pandas & Outliers)   │      │ (Random Forest & Pipe) │      │ (Out-of-fold anomalies)│
+│ (requests + BS4 - Py)  │      │   (Pandas & Outliers)   │      │ (Random Forest & Pipe) │      │ (Out-of-fold anomalies)│
 └────────────────────────┘      └─────────────────────────┘      └────────────────────────┘      └────────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ Since our target discount threshold is set to **$\ge 15\%$**, it operates right 
 
 ## 📁 Repository Structure
 * [main.py](file:///Users/ennio/Documents/Projet_Scrap/main.py): Pipeline orchestrator.
-* [scrap.py](file:///Users/ennio/Documents/Projet_Scrap/scrap.py): Playwright script to fetch real-time listings (with per-page retries and a run history).
+* [scrap.py](file:///Users/ennio/Documents/Projet_Scrap/scrap.py): Fetches real-time listings over plain HTTP (with per-page retries and a run history).
 * [model.py](file:///Users/ennio/Documents/Projet_Scrap/model.py): Data cleaning, preprocessing pipeline, ML training, and deal extraction.
 * `report.py`: Generates a human-readable Markdown summary of the detected deals.
 * `config.py`: Central place for URLs, file paths, and thresholds (outlier bounds, discount threshold).
@@ -92,7 +92,6 @@ Since our target discount threshold is set to **$\ge 15\%$**, it operates right 
    python3.12 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
-   playwright install --with-deps chromium
    ```
    > `numpy==2.5.1` requires Python >= 3.12. On macOS with Homebrew Python, running `pip install` outside a virtual environment also raises an `externally-managed-environment` error (PEP 668) — using a `venv` as shown above avoids both issues.
 

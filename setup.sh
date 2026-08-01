@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installe l'environnement du projet en une seule commande déterministe :
-# sélection d'un interpréteur Python compatible, venv, dépendances, Chromium.
+# sélection d'un interpréteur Python compatible, venv, dépendances.
 set -euo pipefail
 
 echo "== Sélection d'un interpréteur Python >= 3.12 (requis par numpy==2.5.1) =="
@@ -29,8 +29,5 @@ source venv/bin/activate
 echo "== Installation des dépendances Python =="
 pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
-
-echo "== Installation de Chromium (Playwright) =="
-playwright install --with-deps chromium
 
 echo "== Setup terminé : source venv/bin/activate puis python main.py =="
