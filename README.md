@@ -81,13 +81,20 @@ Since our target discount threshold is set to **$\ge 15\%$**, it operates right 
    ```
 
 2. **Create a virtual environment and install dependencies**:
+
+   Either run the setup script (picks a compatible Python automatically, requires 3.12+):
    ```bash
-   python3 -m venv venv
+   ./setup.sh
+   source venv/bin/activate
+   ```
+   ...or do it manually:
+   ```bash
+   python3.12 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
-   playwright install chromium
+   playwright install --with-deps chromium
    ```
-   > On macOS with Homebrew Python, running `pip install` outside a virtual environment raises an `externally-managed-environment` error (PEP 668). Using a `venv` as shown above avoids this.
+   > `numpy==2.5.1` requires Python >= 3.12. On macOS with Homebrew Python, running `pip install` outside a virtual environment also raises an `externally-managed-environment` error (PEP 668) — using a `venv` as shown above avoids both issues.
 
 3. **Run the pipeline**:
    ```bash

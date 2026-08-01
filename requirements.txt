@@ -1,3 +1,5 @@
+# Requiert Python >= 3.12 (numpy==2.5.1 ne publie pas de wheel pour une version antérieure).
+# Utiliser ./setup.sh, qui sélectionne automatiquement un interpréteur compatible.
 pandas==3.0.5
 numpy==2.5.1
 scikit-learn==1.9.0
