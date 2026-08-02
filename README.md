@@ -8,7 +8,7 @@
 Finding an apartment at a fair price in Paris is a major challenge due to high demand and significant price variance. 
 
 This project automates the entire data lifecycle to detect market anomalies:
-1. **Automated Scraping**: Crawls live rental listings in Paris over plain HTTP ([requests](https://requests.readthedocs.io/) + [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/)) — the target site is server-rendered, so no browser is needed.
+1. **Automated Scraping**: Crawls live rental listings in Paris over plain HTTP (Playwright) — the target site is server-rendered, so no browser is needed.
 2. **Data Cleaning & Filtering**: Purges outliers and cleans structural features using [Pandas](https://pandas.pydata.org/).
 3. **ML Modeling**: Estimates rental prices using a `RandomForestRegressor` with target log-transformation (`log1p`) and column-specific preprocessing.
 4. **Deal Detection Engine**: Isolates listings priced $\ge 15\%$ below their estimated market value using **unbiased out-of-fold predictions**.
